@@ -2,6 +2,21 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 const logger = require('../utils/logger');
+const config = require('../config');
+
+function formatTimeOnly(date, timezone) {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      hour12: false,
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return formatter.format(date);
+  } catch (e) {
+    return date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  }
+}
 
 class SheetsService {
   constructor({ googleSheetsConfig, localCsvPath }) {
@@ -65,24 +80,24 @@ class SheetsService {
 
     const note = metadata?.note ? metadata.note.trim() : '';
     const description = note ? `${expense.description} - ${note}` : expense.description;
+    const now = new Date();
+    const timeOnly = formatTimeOnly(now, config.defaults.timezone);
     const values = [
       [
-        new Date().toISOString(),
+        timeOnly,
         expense.date,
         expense.category,
         description,
         expense.amount,
-        '',
+        expense.account || '',
         expense.merchant || '',
-        '',
-        '',
         '',
       ],
     ];
 
     await this.sheetsApi.spreadsheets.values.append({
       spreadsheetId: this.googleSheetsConfig.spreadsheetId,
-      range: `${this.googleSheetsConfig.tabName || 'Expenses'}!A:J`,
+      range: `${this.googleSheetsConfig.tabName || 'Expenses'}!A:H`,
       valueInputOption: 'USER_ENTERED',
       requestBody: {
         values,
@@ -103,23 +118,23 @@ class SheetsService {
     await fs.promises.mkdir(path.dirname(absolutePath), { recursive: true });
 
     if (!fs.existsSync(absolutePath)) {
-      const header = 'timestamp,date,category,description,amount,currency,merchant,source,chat_name,message_id\n';
+      const header = 'timestamp,date,category,description,amount,account,merchant,source\n';
       await fs.promises.writeFile(absolutePath, header, 'utf8');
       logger.info('SheetsService', `Created CSV log at ${absolutePath}`);
     }
 
     const note = metadata?.note ? metadata.note.trim() : '';
     const description = note ? `${expense.description} - ${note}` : expense.description;
+    const now = new Date();
+    const timeOnly = formatTimeOnly(now, config.defaults.timezone);
     const row = [
-      new Date().toISOString(),
+      timeOnly,
       expense.date,
       expense.category,
       description,
       expense.amount,
-      '',
+      expense.account || '',
       expense.merchant || '',
-      '',
-      '',
       '',
     ]
       .map((value) => {

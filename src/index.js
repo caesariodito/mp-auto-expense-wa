@@ -20,6 +20,27 @@ const sheetsService = new SheetsService({
 
 const expenseParser = new ExpenseParser({ config });
 
+const ACCOUNT_OVERRIDE_REGEX = /\bacc:([a-z0-9 _-]+)/i;
+const ACCOUNT_OVERRIDE_STRIP_REGEX = /\bacc:[a-z0-9 _-]+/gi;
+
+function extractAccountDirective(sourceText) {
+  if (!sourceText) {
+    return { accountOverride: null, cleanedText: '' };
+  }
+
+  const match = ACCOUNT_OVERRIDE_REGEX.exec(sourceText);
+  const accountOverride = match ? match[1].trim() : null;
+  const cleanedText = sourceText
+    .replace(ACCOUNT_OVERRIDE_STRIP_REGEX, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  return {
+    accountOverride: accountOverride || null,
+    cleanedText,
+  };
+}
+
 let selfId = null;
 
 function refreshSelfId() {
@@ -101,7 +122,10 @@ async function logAllowedChatHistories() {
           : "unknown";
         const fromSelf = isMessageFromSelf(message);
         const direction = fromSelf ? "outgoing" : "incoming";
-        const preview = (message.body || "").replace(/\s+/g, " ").trim();
+        const body = typeof message.body === "string" ? message.body : "";
+        const { cleanedText: sanitizedBody } = extractAccountDirective(body);
+        const previewSource = sanitizedBody || body;
+        const preview = previewSource.replace(/\s+/g, " ").trim();
         const content = preview ? preview.slice(0, 200) : "[no text]";
         const messageId = message.id?._serialized || "unknown";
         const messageType = message.type || "unknown";
@@ -262,7 +286,9 @@ async function handleMessage(message) {
   const timestampMs =
     (message.timestamp || Math.floor(Date.now() / 1000)) * 1000;
   const media = await extractMedia(message);
-  const text = message.body?.trim();
+  const rawText = typeof message.body === 'string' ? message.body.trim() : '';
+  const { accountOverride, cleanedText } = extractAccountDirective(rawText);
+  const parsingText = cleanedText;
 
   if (media) {
     logger.info(
@@ -273,12 +299,12 @@ async function handleMessage(message) {
     logger.info(
       "Handler",
       `Message ${message.id._serialized} contains text only${
-        text ? "" : " (empty body)"
+        parsingText ? "" : " (empty body)"
       }`
     );
   }
 
-  const textPreview = text ? text.replace(/\s+/g, " ").trim() : "";
+  const textPreview = parsingText ? parsingText.replace(/\s+/g, " ").trim() : "";
   if (textPreview) {
     const fromSelf = isMessageFromSelf(message);
     const author = message.author || (fromSelf ? selfId || client.info?.wid?._serialized || "" : message.from);
@@ -294,9 +320,11 @@ async function handleMessage(message) {
       `Parsing expense details for message ${message.id._serialized}`
     );
     const expense = await expenseParser.parse({
-      text,
+      text: parsingText,
       media,
       timestampMs,
+      accountOverride,
+      rawText,
     });
 
     logger.info(
@@ -312,9 +340,8 @@ async function handleMessage(message) {
       } to log target`
     );
 
-    const note = media && text ? text : "";
+    const note = media && parsingText ? parsingText : "";
     await sheetsService.appendExpense(expense, {
-      messageId: message.id?._serialized || "",
       note,
     });
 

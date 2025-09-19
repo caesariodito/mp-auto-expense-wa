@@ -79,6 +79,7 @@ function fallbackParseText(text, fallbackDate, defaultCurrency) {
     amount: sanitizedAmount,
     currency: normalizeCurrency(currency, defaultCurrency),
     merchant: null,
+    account: null,
   };
 }
 
@@ -94,6 +95,110 @@ function normalizeCurrency(currency, defaultCurrency) {
   if (trimmed.length === 3) return trimmed;
   return defaultCurrency;
 }
+const ACCOUNT_DEFINITIONS = [
+  { name: 'cash', aliases: ['cash', 'tunai'] },
+  { name: 'gopay', aliases: ['gopay', 'go-pay', 'go pay', 'gojek pay'] },
+  { name: 'shopeepay', aliases: ['shopeepay', 'shopee pay', 'shopee-pay'] },
+  { name: 'isaku', aliases: ['isaku'] },
+  { name: 'bca', aliases: ['bca', 'bank central asia', 'bank bca'] },
+  {
+    name: 'flazz emoney',
+    aliases: ['flazz emoney', 'flazz', 'flazz e-money', 'emoney', 'e-money', 'bca flazz', 'flazz card'],
+  },
+  { name: 'superbank', aliases: ['superbank', 'super bank'] },
+  {
+    name: 'jago cloudthingy',
+    aliases: ['jago cloudthingy', 'jago', 'bank jago', 'cloudthingy', 'jago cloud thingy'],
+  },
+];
+
+function escapeRegExp(value) {
+  return value.replace(/[-/\^$*+?.()|[\]{}]/g, '\$&');
+}
+
+const ACCOUNT_PATTERNS = ACCOUNT_DEFINITIONS.map(({ name, aliases }) => {
+  const uniqueAliases = Array.from(new Set([name, ...aliases]));
+  return {
+    name,
+    regexes: uniqueAliases.map((alias) =>
+      new RegExp('\\b' + escapeRegExp(alias) + '\b', 'i')
+    ),
+  };
+});
+
+function normalizeAccountName(value) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.toString().trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  for (const { name, aliases } of ACCOUNT_DEFINITIONS) {
+    if (name === normalized) {
+      return name;
+    }
+
+    for (const alias of aliases) {
+      if (alias.toLowerCase() === normalized) {
+        return name;
+      }
+    }
+  }
+
+  return null;
+}
+
+function findAccountInText(text) {
+  if (!text) {
+    return null;
+  }
+
+  for (const { name, regexes } of ACCOUNT_PATTERNS) {
+    for (const regex of regexes) {
+      if (regex.test(text)) {
+        return name;
+      }
+    }
+  }
+
+  return null;
+}
+
+function resolveAccount({ override, parsedAccount, textCandidates }) {
+  const normalizedOverride = normalizeAccountName(override);
+  if (override && !normalizedOverride) {
+    logger.warn(
+      'ExpenseParser',
+      `Account override "${override}" is not recognized; ignoring override.`
+    );
+  }
+  if (normalizedOverride) {
+    return normalizedOverride;
+  }
+
+  const normalizedParsed = normalizeAccountName(parsedAccount);
+  if (normalizedParsed) {
+    return normalizedParsed;
+  }
+
+  for (const candidate of textCandidates || []) {
+    if (!candidate) {
+      continue;
+    }
+
+    const detected = findAccountInText(candidate);
+    if (detected) {
+      return detected;
+    }
+  }
+
+  return null;
+}
+
+
 
 class ExpenseParser {
   constructor({ config }) {
@@ -106,38 +211,56 @@ class ExpenseParser {
     });
   }
 
-  async parse({ text, media, timestampMs }) {
+  async parse({ text, media, timestampMs, accountOverride, rawText }) {
     const fallbackDate = formatDateFromTimestamp(timestampMs, this.timezone);
+    const sanitizedText = text || '';
+    const originalText = rawText || text || '';
+    let expense;
 
     if (media) {
       try {
         logger.info('ExpenseParser', 'Attempting image-based extraction via Gemini');
-        return await this.geminiService.parseImageExpense(
+        expense = await this.geminiService.parseImageExpense(
           {
             base64Data: media.base64Data,
             mimeType: media.mimeType,
-            accompanyingText: text,
+            accompanyingText: sanitizedText,
           },
           fallbackDate
         );
       } catch (error) {
         logger.error('ExpenseParser', 'Gemini image parsing failed', error);
         logger.info('ExpenseParser', 'Falling back to text parser after image failure');
-        if (text) {
-          return fallbackParseText(text, fallbackDate, this.defaultCurrency);
+        if (sanitizedText) {
+          expense = fallbackParseText(sanitizedText, fallbackDate, this.defaultCurrency);
+        } else {
+          throw error;
         }
-        throw error;
+      }
+    } else {
+      try {
+        logger.info('ExpenseParser', 'Attempting text-based extraction via Gemini');
+        expense = await this.geminiService.parseTextExpense(sanitizedText, fallbackDate);
+      } catch (error) {
+        logger.error('ExpenseParser', 'Gemini text parsing failed', error);
+        logger.info('ExpenseParser', 'Falling back to regex parser for text message');
+        expense = fallbackParseText(sanitizedText, fallbackDate, this.defaultCurrency);
       }
     }
 
-    try {
-      logger.info('ExpenseParser', 'Attempting text-based extraction via Gemini');
-      return await this.geminiService.parseTextExpense(text, fallbackDate);
-    } catch (error) {
-      logger.error('ExpenseParser', 'Gemini text parsing failed', error);
-      logger.info('ExpenseParser', 'Falling back to regex parser for text message');
-      return fallbackParseText(text, fallbackDate, this.defaultCurrency);
+    const account = resolveAccount({
+      override: accountOverride,
+      parsedAccount: expense.account,
+      textCandidates: [sanitizedText, originalText, expense.description, expense.merchant],
+    });
+
+    expense.account = account;
+
+    if (account) {
+      logger.info('ExpenseParser', `Resolved account "${account}" for parsed payload.`);
     }
+
+    return expense;
   }
 }
 

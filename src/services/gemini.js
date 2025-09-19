@@ -45,7 +45,8 @@ class GeminiService {
   "category": string,
   "amount": number,
   "currency": ISO 4217 currency code (3 letters),
-  "merchant": string | null
+  "merchant": string | null,
+  "account": string | null
 }
 
 Rules:
@@ -55,6 +56,7 @@ Rules:
 - Keep the description short (<=60 characters) and human readable.
 - Category should be a single word (e.g., Food, Travel, Groceries). Use "General" if unclear.
 - Merchant can be null if unknown.
+- Account must be one of: cash, gopay, shopeepay, isaku, bca, flazz emoney, superbank, jago cloudthingy. Use lowercase and return null if unsure.
 - Use a decimal number for amount, without currency symbols.
 - Do not wrap the JSON in markdown fences or explanations.`;
   }
@@ -67,6 +69,7 @@ Rules:
       amount: null,
       currency: this.defaultCurrency,
       merchant: null,
+      account: null,
       ...raw,
     };
 
@@ -88,6 +91,13 @@ Rules:
 
     if (!parsed.currency) {
       parsed.currency = this.defaultCurrency;
+    }
+
+    if (parsed.account !== undefined && parsed.account !== null) {
+      parsed.account = String(parsed.account).trim();
+      if (!parsed.account) {
+        parsed.account = null;
+      }
     }
 
     parsed.currency = String(parsed.currency).trim().toUpperCase();
