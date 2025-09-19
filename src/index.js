@@ -207,12 +207,30 @@ async function shouldProcessMessage(message) {
     );
   }
 
+  // Resolve the logical chat ID for filtering. For self-sent messages,
+  // message.from can be the self LID rather than the group JID, so we
+  // fall back to message.to or parse from the serialized message ID.
+  function resolveChatIdForFilter(msg) {
+    const isChatJid = (jid) => typeof jid === 'string' && /@(?:g|c)\.us$/i.test(jid);
+
+    if (isChatJid(msg.from)) return msg.from;
+    if (isChatJid(msg.to)) return msg.to;
+
+    const serialized = msg.id?._serialized || '';
+    const match = serialized.match(/^[a-z]+_([^_]+?@(?:g|c)\.us)_/i);
+    if (match) return match[1];
+
+    return msg.from || '';
+  }
+
   if (config.whatsapp.allowedChatIds.length > 0) {
-    const isAllowed = config.whatsapp.allowedChatIds.includes(message.from);
+    const chatIdForFilter = resolveChatIdForFilter(message);
+    const isAllowed = config.whatsapp.allowedChatIds.includes(chatIdForFilter);
     if (!isAllowed) {
+      const fromDisplay = message.from;
       logger.info(
         "Handler",
-        `Ignoring message from ${message.from} because it is not in ALLOWED_CHAT_IDS`
+        `Ignoring message from ${fromDisplay} (chat=${chatIdForFilter}) because it is not in ALLOWED_CHAT_IDS`
       );
     }
     return isAllowed;
