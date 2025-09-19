@@ -1,14 +1,14 @@
 services:
   app:
     container_name: auto-expense-wa
+    # Run as root to avoid permission issues on bind-mounted auth/cache dirs
+    user: "0:0"
     build: .
     # Alternatively, build once and use a tagged image:
     # image: auto-expense-wa:latest
     env_file:
       - .env
     environment:
-      # Ensure Puppeteer uses installed Chromium in container
-      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
       - PUPPETEER_DISABLE_HEADLESS_WARNING=true
     volumes:
       # Persist WhatsApp auth (mandatory to avoid relogin every run)

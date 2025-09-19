@@ -14,8 +14,7 @@ RUN npm ci --omit=dev
 COPY --chown=pptruser:pptruser src ./src
 COPY --chown=pptruser:pptruser .env.example ./
 
-# Ensure Puppeteer uses the system Chromium from the base image
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Optional: quiet Puppeteer headless warnings
 ENV PUPPETEER_DISABLE_HEADLESS_WARNING=true
 
 # Create common data directories (owned by pptruser by default)
