@@ -13,6 +13,31 @@ function parseList(value) {
     : [];
 }
 
+function parseBoolean(value, defaultValue) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  const normalized = value.toString().trim().toLowerCase();
+  if (['true', '1', 'yes', 'y', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['false', '0', 'no', 'n', 'off'].includes(normalized)) {
+    return false;
+  }
+
+  return defaultValue;
+}
+
+function parseInteger(value, defaultValue) {
+  if (value === undefined || value === null || value === '') {
+    return defaultValue;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isNaN(parsed) ? defaultValue : parsed;
+}
+
 function resolveServiceAccount(rawValue) {
   if (!rawValue) {
     return null;
@@ -52,6 +77,9 @@ const config = {
   whatsapp: {
     allowedChatIds: parseList(process.env.ALLOWED_CHAT_IDS),
     sessionPath: process.env.WHATSAPP_SESSION_PATH || '.wwebjs_auth',
+    replyEnabled: parseBoolean(process.env.WHATSAPP_REPLY_ENABLED, false),
+    chatLogLimit: parseInteger(process.env.WHATSAPP_CHAT_LOG_LIMIT, 10),
+    selfMessagesOnly: parseBoolean(process.env.WHATSAPP_SELF_MESSAGES_ONLY, true),
   },
 };
 

@@ -20,6 +20,45 @@ const sheetsService = new SheetsService({
 
 const expenseParser = new ExpenseParser({ config });
 
+let selfId = null;
+
+function refreshSelfId() {
+  const resolved = client.info?.wid?._serialized;
+  if (resolved && resolved !== selfId) {
+    selfId = resolved;
+    logger.info("WhatsApp", `Resolved self WhatsApp ID: ${selfId}`);
+  }
+}
+
+function isMessageFromSelf(message) {
+  if (message.fromMe) {
+    return true;
+  }
+
+  if (typeof message.id?.fromMe === 'boolean') {
+    if (message.id.fromMe) {
+      return true;
+    }
+  } else if (typeof message.id?._serialized === 'string' && message.id._serialized.startsWith('true_')) {
+    return true;
+  }
+
+  const authorId = message.author;
+  const chatId = message.from;
+
+  if (selfId) {
+    if (authorId && authorId === selfId) {
+      return true;
+    }
+
+    if (!authorId && chatId === selfId) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 const client = new Client({
   authStrategy: new LocalAuth({ dataPath: config.whatsapp.sessionPath }),
   puppeteer: {
@@ -33,6 +72,56 @@ const client = new Client({
   },
 });
 
+async function logAllowedChatHistories() {
+  const { allowedChatIds, chatLogLimit } = config.whatsapp;
+
+  if (!allowedChatIds || allowedChatIds.length === 0) {
+    logger.info("ChatLog", "ALLOWED_CHAT_IDS is empty; no chat history to display.");
+    return;
+  }
+
+  const limit = Math.max(1, chatLogLimit || 10);
+  refreshSelfId();
+  const currentSelfId = selfId || "";
+
+  for (const chatId of allowedChatIds) {
+    try {
+      const chat = await client.getChatById(chatId);
+      const label = chat?.name || chatId;
+      logger.info(
+        "ChatLog",
+        `Fetching last ${limit} message(s) for chat ${label} (${chatId})`
+      );
+      const messages = await chat.fetchMessages({ limit });
+      const ordered = [...messages].reverse();
+
+      for (const message of ordered) {
+        const timestamp = message.timestamp
+          ? new Date(message.timestamp * 1000).toISOString()
+          : "unknown";
+        const fromSelf = isMessageFromSelf(message);
+        const direction = fromSelf ? "outgoing" : "incoming";
+        const preview = (message.body || "").replace(/\s+/g, " ").trim();
+        const content = preview ? preview.slice(0, 200) : "[no text]";
+        const messageId = message.id?._serialized || "unknown";
+        const messageType = message.type || "unknown";
+        const mediaFlag = message.hasMedia ? "has-media" : "no-media";
+        const author = message.author || (fromSelf ? currentSelfId : message.from);
+        logger.info(
+          "ChatLog",
+          `[${chatId}] ${timestamp} ${direction} author=${author} id=${messageId} ${mediaFlag} type=${messageType} text=${content}`
+        );
+      }
+    } catch (error) {
+      logger.error(
+        "ChatLog",
+        `Unable to retrieve chat history for ${chatId}`,
+        error
+      );
+    }
+  }
+}
+
 client.on("qr", (qr) => {
   logger.info(
     "WhatsApp",
@@ -43,6 +132,7 @@ client.on("qr", (qr) => {
 
 client.on("authenticated", () => {
   logger.info("WhatsApp", "Authentication successful.");
+  refreshSelfId();
 });
 
 client.on("auth_failure", (msg) => {
@@ -51,6 +141,21 @@ client.on("auth_failure", (msg) => {
 
 client.on("ready", () => {
   logger.info("WhatsApp", "Client is ready. Listening for messages...");
+  refreshSelfId();
+  if (!config.whatsapp.replyEnabled) {
+    logger.info(
+      "WhatsApp",
+      "Confirmation replies are disabled; messages will be logged only."
+    );
+  }
+
+  logAllowedChatHistories().catch((error) => {
+    logger.error(
+      "ChatLog",
+      "Failed to log chat history for configured ALLOWED_CHAT_IDS",
+      error
+    );
+  });
 });
 
 client.on("disconnected", (reason) => {
@@ -60,9 +165,22 @@ client.on("disconnected", (reason) => {
 });
 
 async function shouldProcessMessage(message) {
-  if (message.fromMe) {
-    logger.debug("Handler", "Skipping message because it was sent by the bot");
+  const fromSelf = isMessageFromSelf(message);
+
+  if (config.whatsapp.selfMessagesOnly && !fromSelf) {
+    const author = message.author || message.from;
+    logger.info(
+      "Handler",
+      `Ignoring message ${message.id?._serialized || "unknown"} from ${author} because it was not sent by the logged-in account`
+    );
     return false;
+  }
+
+  if (fromSelf) {
+    logger.debug(
+      "Handler",
+      "Processing self-sent message from the logged-in account"
+    );
   }
 
   if (config.whatsapp.allowedChatIds.length > 0) {
@@ -120,6 +238,8 @@ function buildSuccessReply(expense) {
 }
 
 async function handleMessage(message) {
+  refreshSelfId();
+
   if (!(await shouldProcessMessage(message))) {
     logger.debug(
       "Handler",
@@ -158,6 +278,16 @@ async function handleMessage(message) {
     );
   }
 
+  const textPreview = text ? text.replace(/\s+/g, " ").trim() : "";
+  if (textPreview) {
+    const fromSelf = isMessageFromSelf(message);
+    const author = message.author || (fromSelf ? selfId || client.info?.wid?._serialized || "" : message.from);
+    logger.info(
+      "ChatLog",
+      `[${message.from}] ${message.id._serialized} author=${author} text=${textPreview.slice(0, 200)}`
+    );
+  }
+
   try {
     logger.info(
       "Handler",
@@ -187,33 +317,53 @@ async function handleMessage(message) {
       messageId: message.id?._serialized || "",
     });
 
-    const reply = buildSuccessReply(expense);
+    const confirmation = buildSuccessReply(expense);
     logger.info(
       "Handler",
-      `Replying to message ${message.id._serialized} with confirmation`
+      `Expense summary for message ${message.id._serialized}: ${confirmation}`
     );
-    await message.reply(reply);
+
+    if (config.whatsapp.replyEnabled) {
+      logger.info(
+        "Handler",
+        `Replying to message ${message.id._serialized} with confirmation`
+      );
+      await message.reply(confirmation);
+    } else {
+      logger.info(
+        "Handler",
+        "Replies are disabled; skipping confirmation message."
+      );
+    }
+
     logger.info(
       "Handler",
       `Logged expense for message ${message.id._serialized}`
     );
   } catch (error) {
     logger.error("Handler", "Failed to process message", error);
-    await message.reply(
-      "Could not record expense. Please try again or specify amount and description in text."
-    );
+    if (config.whatsapp.replyEnabled) {
+      await message.reply(
+        "Could not record expense. Please try again or specify amount and description in text."
+      );
+    } else {
+      logger.info(
+        "Handler",
+        "Replies are disabled; not sending failure notification."
+      );
+    }
   }
 }
 
-client.on("message", (message) => {
+client.on("message_create", (message) => {
   logger.info(
     "Handler",
-    `Incoming message ${message.id?._serialized || "unknown"} from ${
+    `New message ${message.id?._serialized || "unknown"} from ${
       message.from
-    } (type=${message.type}, hasMedia=${message.hasMedia})`
+    } (type=${message.type}, hasMedia=${message.hasMedia}, fromMe=${message.fromMe})`
   );
   handleMessage(message).catch((error) => {
-    logger.error("Handler", "Unexpected error while handling message", error);
+    logger.error("Handler", "Unexpected error while handling message_create", error);
   });
 });
 

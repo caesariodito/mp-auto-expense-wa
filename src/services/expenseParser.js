@@ -1,17 +1,56 @@
 const GeminiService = require('./gemini');
 const logger = require('../utils/logger');
 
+const OFFSET_TIMEZONE_REGEX = /^(?:GMT|UTC)([+-])(\d{1,2})(?::(\d{2}))?$/i;
+
+function parseOffsetTimezone(value) {
+  if (!value) {
+    return null;
+  }
+
+  const match = OFFSET_TIMEZONE_REGEX.exec(value.trim());
+  if (!match) {
+    return null;
+  }
+
+  const sign = match[1] === '-' ? -1 : 1;
+  const hours = Number.parseInt(match[2], 10);
+  const minutes = match[3] ? Number.parseInt(match[3], 10) : 0;
+
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
+    return null;
+  }
+
+  return sign * (hours * 60 + minutes);
+}
+
 function formatDateFromTimestamp(timestampMs, timezone) {
   const date = new Date(timestampMs);
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-  const parts = formatter.formatToParts(date);
-  const partMap = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-  return `${partMap.year}-${partMap.month}-${partMap.day}`;
+
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+    const parts = formatter.formatToParts(date);
+    const partMap = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+    return `${partMap.year}-${partMap.month}-${partMap.day}`;
+  } catch (error) {
+    const offsetMinutes = parseOffsetTimezone(timezone);
+
+    if (offsetMinutes !== null) {
+      const adjusted = new Date(date.getTime() + offsetMinutes * 60 * 1000);
+      return adjusted.toISOString().slice(0, 10);
+    }
+
+    logger.warn(
+      'ExpenseParser',
+      `Invalid timezone "${timezone}" provided. Falling back to UTC.`
+    );
+    return new Date(timestampMs).toISOString().slice(0, 10);
+  }
 }
 
 function fallbackParseText(text, fallbackDate, defaultCurrency) {
