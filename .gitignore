@@ -2,7 +2,8 @@ node_modules/
 .env
 .wwebjs_auth/
 data/
+service-account.json
+.wwebjs_cache/
 *.log
 .DS_Store
 npm-debug.log*
-
