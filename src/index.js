@@ -311,10 +311,11 @@ async function handleMessage(message) {
         chat?.name || chat?.id?._serialized || "unknown"
       } to log target`
     );
+
+    const note = media && text ? text : "";
     await sheetsService.appendExpense(expense, {
-      source: media ? "image" : "text",
-      chatName: chat?.name || chat?.id?._serialized || "",
       messageId: message.id?._serialized || "",
+      note,
     });
 
     const confirmation = buildSuccessReply(expense);

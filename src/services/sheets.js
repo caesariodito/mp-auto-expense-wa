@@ -63,18 +63,20 @@ class SheetsService {
   async appendToGoogleSheet(expense, metadata) {
     await this.ensureAuth();
 
+    const note = metadata?.note ? metadata.note.trim() : '';
+    const description = note ? `${expense.description} - ${note}` : expense.description;
     const values = [
       [
         new Date().toISOString(),
         expense.date,
         expense.category,
-        expense.description,
+        description,
         expense.amount,
-        expense.currency,
+        '',
         expense.merchant || '',
-        metadata.source || 'whatsapp',
-        metadata.chatName || '',
-        metadata.messageId || '',
+        '',
+        '',
+        '',
       ],
     ];
 
@@ -106,17 +108,19 @@ class SheetsService {
       logger.info('SheetsService', `Created CSV log at ${absolutePath}`);
     }
 
+    const note = metadata?.note ? metadata.note.trim() : '';
+    const description = note ? `${expense.description} - ${note}` : expense.description;
     const row = [
       new Date().toISOString(),
       expense.date,
       expense.category,
-      expense.description,
+      description,
       expense.amount,
-      expense.currency,
+      '',
       expense.merchant || '',
-      metadata.source || 'whatsapp',
-      metadata.chatName || '',
-      metadata.messageId || '',
+      '',
+      '',
+      '',
     ]
       .map((value) => {
         if (value === null || value === undefined) {
