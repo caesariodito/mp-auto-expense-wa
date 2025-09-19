@@ -1,0 +1,18 @@
+# Folders
+node_modules
+.git
+.qodo
+.wwebjs_auth
+.wwebjs_cache
+data
+
+# Env and secrets
+.env
+service-account.json
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+

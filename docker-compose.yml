@@ -1,0 +1,26 @@
+services:
+  app:
+    container_name: auto-expense-wa
+    build: .
+    # Alternatively, build once and use a tagged image:
+    # image: auto-expense-wa:latest
+    env_file:
+      - .env
+    environment:
+      # Ensure Puppeteer uses installed Chromium in container
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+      - PUPPETEER_DISABLE_HEADLESS_WARNING=true
+    volumes:
+      # Persist WhatsApp auth (mandatory to avoid relogin every run)
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      # Optional cache for performance
+      - ./.wwebjs_cache:/app/.wwebjs_cache
+      # CSV fallback data directory
+      - ./data:/app/data
+      # Optional: mount service account JSON if using file path
+      - ./service-account.json:/app/service-account.json:ro
+    # Puppeteer/Chromium stability in containers
+    shm_size: "1gb"
+    tty: true
+    stdin_open: true
+    restart: unless-stopped

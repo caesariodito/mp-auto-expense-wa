@@ -50,6 +50,32 @@ npm run start
 - On first launch, a QR code prints to the console. Scan it with WhatsApp on your phone to link the session.
 - Keep the machine running to maintain the WhatsApp Web session. The `.wwebjs_auth/` directory stores credentials.
 
+## Docker
+
+Quick start with Docker Compose (recommended for homelab):
+
+```bash
+cp .env.example .env # fill in your values
+docker compose build
+# First run in foreground to scan the QR code
+docker compose up
+# After the session is linked, you can run detached
+# docker compose up -d
+```
+
+What this does:
+
+- Uses a Chromium-ready base image for Puppeteer.
+- Persists WhatsApp auth in `./.wwebjs_auth` so you don’t have to relink.
+- Persists CSV fallback logs under `./data`.
+- Reads configuration from your local `.env`.
+
+Notes:
+
+- To use Google Sheets via file credentials, mount `service-account.json` and set `GOOGLE_SERVICE_ACCOUNT_JSON=service-account.json` in `.env`.
+- On first launch, watch the compose logs to see the QR code (or run without `-d`).
+- If you ever need to relink WhatsApp, stop the container and delete `./.wwebjs_auth` before starting again.
+
 ## WhatsApp Interaction
 
 - **Text**: Send messages like `Lunch 12.50 USD` or `Groceries at Target 48.90`.
